@@ -3,9 +3,10 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from moveit_msgs.action import MoveGroup
-from moveit_msgs.msg import MotionPlanRequest, Constraints, PositionConstraint, OrientationConstraint
+from moveit_msgs.msg import MotionPlanRequest, Constraints, PositionConstraint, OrientationConstraint, JointConstraint
 from shape_msgs.msg import SolidPrimitive
 from geometry_msgs.msg import PoseStamped, Quaternion
+import time
 
 
 class MoveItEEClient(Node):
@@ -16,9 +17,15 @@ class MoveItEEClient(Node):
         while not self._client.wait_for_server(1.0):
             self.get_logger().warning("Waiting for Action Server...")
 
-        self.group_name = "interbotix_arm"
+        self.group_name_arm = "interbotix_arm"
+        self.group_name_gripper = "interbotix_gripper"
         self.ee_link = "rx200/ee_gripper_link"
         self.base_link = "rx200/base_link"
+        self.gripper_joint = "left_finger"
+
+        self.declare_parameter("start_state_gripper", value=True)
+        self.send_gr_pose(self.get_parameter("start_state_gripper").value)
+
 
         self.get_logger().info('Node initialized successfully!')
 
@@ -31,7 +38,7 @@ class MoveItEEClient(Node):
         pose.pose.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=w)
 
         req = MotionPlanRequest()
-        req.group_name = self.group_name
+        req.group_name_arm = self.group_name_arm
         req.allowed_planning_time = 5.0
         req.num_planning_attempts = 3
 
@@ -67,6 +74,29 @@ class MoveItEEClient(Node):
         send_future = self._client.send_goal_async(goal, feedback_callback=self._feedback_cb)
         send_future.add_done_callback(self._goal_response_cb)
 
+    def send_gr_pose(self, open=True):
+        req = MotionPlanRequest()
+        req.group_name = self.group_name_gripper
+        req.allowed_planning_time = 2.0
+        req.num_planning_attempts = 1
+
+        jc = JointConstraint()
+        jc.joint_name = self.gripper_joint
+        jc.position = 0.0 if open else 0.035
+        jc.tolerance_above = 0.01
+        jc.tolerance_below = 0.01
+        jc.weight = 1.0
+
+        goal_constraints = JointConstraint()
+        goal_constraints.joint_constraints = [jc]
+        req.goal_constraints = [goal_constraints]
+
+        goal = MoveGroup.Goal()
+        goal.request = req
+        goal.planning_options.plan_only = False
+
+        send_future = self._client.send_goal_async(goal)
+        send_future.add_done_callback(self._goal_response_cb)
 
     def _goal_response_cb(self, future):
         goal_handle = future.result()
@@ -88,7 +118,22 @@ class MoveItEEClient(Node):
 def main():
     rclpy.init()
     node = MoveItEEClient()
-    node.send_pose(0.25, 0.0, 0.15)  # single EE pose
+
+    # # List of poses (x, y, z)
+    # poses = [
+    #     (0.25, 0.0, 0.15),
+    #     (0.20, 0.0, 0.20),
+    #     (0.15, 0.0, 0.10),
+    #     (0.25, 0.0, 0.15)
+    # ]
+
+    # for (x, y, z) in poses:
+    #     node.get_logger().info(f"Moving to: x={x}, y={y}, z={z}")
+    #     node.send_pose(x, y, z)
+
+    # node.send_pose(0.25, 0.0, 0.15)
+    # node.send_gr_pose()
+
     rclpy.spin(node)
     rclpy.shutdown()
 
